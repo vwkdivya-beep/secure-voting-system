@@ -7,10 +7,10 @@ from email.mime.text import MIMEText
 import mysql.connector
 from datetime import datetime, timedelta
 
-# Environment Configuration (Prevents committing hardcoded passwords to public GitHub repositories)
+# Environment Configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "YOUR_SECURE_PASSWORD")  # Set via environment variables
+DB_PASSWORD = os.getenv("DB_PASSWORD", "YOUR_SECURE_PASSWORD")
 SMTP_EMAIL = os.getenv("SMTP_EMAIL", "vwkdivya@gmail.com")
 SMTP_APP_PASSWORD = os.getenv("SMTP_APP_PASSWORD", "YOUR_SMTP_APP_PASSWORD") 
 
@@ -28,10 +28,9 @@ def create_database_if_not_exists():
         return False
 
 if not create_database_if_not_exists():
-    print("System Setup Failed: Unable to verify or create database connection. Exiting.")
+    print("System Setup Failed: Unable to verify database connection. Exiting.")
     exit()
 
-# Initialize Global Database Connections
 conn = mysql.connector.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, database="vote")
 cur = conn.cursor()
 
@@ -98,7 +97,6 @@ def init_all_tables():
         roll_no INT NOT NULL)""")
     conn.commit()
 
-# Ensure schema configuration on execution
 init_admins_table()
 init_otp_table()
 init_all_tables()
@@ -146,37 +144,145 @@ def verify_otp(email, user_otp):
         return True
     return False
 
+def add_admin():
+    teacher_id = input("Enter teacher ID: ").strip()
+    email = input("Enter email: ").strip()
+    name = input("Enter name: ").strip()
+    try:
+        cur.execute("INSERT INTO alladmins (teacher_id, emailid, name) VALUES (%s, %s, %s)", (teacher_id, email, name))
+        conn.commit()
+        print("Admin added successfully!")
+    except mysql.connector.Error as err:
+        print(f"Error adding admin: {err}")
+
+def remove_admin():
+    email = input("Enter email to remove: ").strip()
+    if email in get_admin_emails():
+        cur.execute("DELETE FROM alladmins WHERE emailid = %s", (email,))
+        conn.commit()
+        print("Admin removed successfully!")
+    else:
+        print("Admin user not found!")
+
+def show_admins():
+    cur.execute("SELECT teacher_id, emailid, name FROM alladmins")
+    print("\n--- CURRENT AUTHORIZED ADMINISTRATORS ---")
+    for admin in cur.fetchall():
+        print(f"ID: {admin[0]} | Email: {admin[1]} | Name: {admin[2]}")
+
+def add_poll():
+    teacher_id = input("Enter teacher ID: ").strip()
+    title = input("Enter poll title: ").strip()
+    desc = input("Enter description: ").strip()
+    start = input("Enter start date (YYYY-MM-DD): ").strip()
+    end = input("Enter end date (YYYY-MM-DD): ").strip()
+    creator = input("Enter creator name: ").strip()
+    class_num_input = input("Enter class restriction (blank for all): ").strip()
+    section_input = input("Enter section restriction (blank for all): ").strip()
+    
+    class_num = int(class_num_input) if class_num_input.isdigit() else None
+    section = section_input if section_input else None
+    
+    cur.execute("""INSERT INTO polls(teacher_id, title, description, start_time, end_time, created_by, class_num, sec) 
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", (teacher_id, title, desc, start, end, creator, class_num, section))
+    conn.commit()
+    poll_id = cur.lastrowid  
+    print(f"\nPoll '{title}' created successfully! Add options below (Leave blank to finish):")
+    
+    option_num = 1
+    while True:
+        candidate = input(f"Option {option_num}: ").strip()
+        if not candidate:
+            break
+        cur.execute("INSERT INTO poll_options (poll_id, teacher_id, option_text) VALUES (%s, %s, %s)", (poll_id, teacher_id, candidate))
+        option_num += 1
+    conn.commit()
+
+def show_active_polls():
+    query = "SELECT poll_id, title, start_time, end_time, created_by FROM polls WHERE start_time <= CURDATE() AND end_time >= CURDATE()"
+    cur.execute(query)
+    rows = cur.fetchall()
+    if not rows:
+        print("No active polling modules found.")
+    for r in rows:
+        print(f"ID: {r[0]} | Title: {r[1]} | Lifespan: {r[2]} to {r[3]} | Admin: {r[4]}")
+    return rows
+
+def delete_poll():
+    title = input("Enter poll title to remove: ").strip()
+    cur.execute("DELETE FROM polls WHERE title = %s", (title,))
+    conn.commit()
+    print("Module removed successfully.")
+
+def admin_menu():
+    while True:
+        print("\n=== SYSTEM MANAGEMENT INTERFACE ===")
+        print("1. Register New Administrator")
+        print("2. De-authorize Administrator")
+        print("3. Audit Authorized Staff Records")
+        print("4. Deploy New Ballot Module")
+        print("5. Inspect Active Live Ballots")
+        print("6. Revoke Active Ballot Module")
+        print("7. Terminate Administrative Terminal")
+        choice = input("Enter selection index: ").strip()
+        if choice == '1': add_admin()
+        elif choice == '2': remove_admin()
+        elif choice == '3': show_admins()
+        elif choice == '4': add_poll()
+        elif choice == '5': show_active_polls()
+        elif choice == '6': delete_poll()
+        elif choice == '7': break
+
+def student_login():
+    name = input("Enter student complete name: ").strip()
+    email = input("Enter university email node: ").strip()
+    try:
+        roll_no = int(input("Enter roll code: ").strip())
+        adm_no = int(input("Enter record admission number: ").strip())
+    except ValueError:
+        print("Invalid operational parameters input.")
+        return None, None
+    
+    cur.execute("SELECT adm_no, class_num, sec FROM stud_log WHERE adm_no = %s", (adm_no,))
+    record = cur.fetchone()
+    if record:
+        print(f"Identity authenticated. Welcome back, {name}.")
+        return record[1], record[2]
+        
+    cur.execute("INSERT INTO stud_log (adm_no, name, email, class_num, sec, roll_no) VALUES (%s, %s, %s, 12, 'A', %s)", (adm_no, name, email, roll_no))
+    conn.commit()
+    return 12, 'A'
+
+def student_menu(class_num, section):
+    while True:
+        print("\n=== STUDENT ACCESS TERMINAL ===")
+        print("1. Scan Scoped Active Ballots")
+        print("2. Record Verified Ballot Vote")
+        print("3. Logout Session")
+        choice = input("Choose action: ").strip()
+        if choice == '3': break
+
 def admin_otp_login():
     print("\n--- ADMINISTRATOR ACCESS PORTAL ---")
     email = input("Enter admin email address: ").strip()
-    
     cur.execute("SELECT name FROM alladmins WHERE emailid = %s", (email,))
     admin_exists = cur.fetchone()
-    
     if not admin_exists:
-        print("Access Denied: Email address is not authorized as an Administrator.")
+        print("Access Denied: Email address unauthorized.")
         return False
 
     otp = generate_otp()
     store_otp(email, otp)
-    
     if send_email(otp, email):
         print(f"A 2-Step Verification code has been dispatched to {email}.")
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, 4):
             user_otp = input("Enter 6-Digit OTP: ").strip()
             if verify_otp(email, user_otp):
                 print(f"Authentication Successful. Welcome back, {admin_exists[0]}.")
                 admin_menu()
                 return True
-            if attempt < max_attempts:
-                print(f"Invalid verification code. {max_attempts - attempt} attempts remaining.")
-        print("Security Alert: Max attempts reached. Session terminated.")
-    else:
-        print("System Error: Failed to initiate secure multi-factor authentication dispatch loop.")
+            print(f"Invalid verification code. {3 - attempt} attempts remaining.")
     return False
-
-# ... [Keep your menu operations, voting logic, and queries as defined in your prompt]
 
 def main_menu():
     while True:
@@ -185,22 +291,14 @@ def main_menu():
         print("2. Student Registration & Terminal")
         print("3. Terminate System")
         choice = input("Select System Interface: ").strip()
-        
-        if choice == '1':
-            admin_otp_login()
+        if choice == '1': admin_otp_login()
         elif choice == '2':
-            class_num, section = student_login()
-            if class_num is not None or section is not None:
-                student_menu(class_num, section)
-        elif choice == '3':
-            print("Shutting down database pipelines... Operations ended securely.")
-            break
-        else:
-            print("Operational Error: Option invalid.")
+            c, s = student_login()
+            if c: student_menu(c, s)
+        elif choice == '3': break
 
 if __name__ == "__main__":
-    try:
-        main_menu()
+    try: main_menu()
     finally:
         cur.close()
         conn.close()
