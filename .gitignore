@@ -1,0 +1,12 @@
+# Environments
+.env
+.env.local
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local IDE configs
+.vscode/
+.idea/
